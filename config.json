@@ -1,0 +1,27 @@
+{
+  "RestorePoint": {
+    "DiskSpacePercent": 10,
+    "MinimumCount": 10,
+    "MaximumCount": 20,
+    "CreateOnSchedule": true,
+    "ScheduleIntervalMinutes": 1440
+  },
+  "Email": {
+    "Enabled": false,
+    "SmtpServer": "smtp.example.com",
+    "SmtpPort": 587,
+    "UseSsl": true,
+    "From": "restorepoint@example.com",
+    "To": [
+      "admin@example.com"
+    ],
+    "Username": "",
+    "PasswordEncrypted": ""
+  },
+  "Logging": {
+    "LogPath": "Logs\\RestorePoint.log",
+    "MaxLogSizeMB": 10,
+    "RetentionDays": 30
+  }
+}
+
