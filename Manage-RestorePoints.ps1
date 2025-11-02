@@ -37,10 +37,10 @@
 
 .NOTES
     File Name      : Manage-RestorePoints.ps1
-    Author         : PowerShell Scripts Project
+    Author         : myTech.Today
     Prerequisite   : PowerShell 5.1 or later, Administrator privileges
-    Copyright      : (c) 2025. All rights reserved.
-    Version        : 1.2.0
+    Copyright      : (c) 2025 myTech.Today. All rights reserved.
+    Version        : 1.3.0
 
 .LINK
     https://github.com/mytech-today-now/PowerShellScripts
@@ -67,8 +67,18 @@ param(
 #Requires -Version 5.1
 #Requires -RunAsAdministrator
 
+# Import required modules (ScheduledTasks module for scheduled task management)
+# Note: ScheduledTasks module is available on Windows Server 2012 R2 / Windows 8.1 and later
+try {
+    Import-Module ScheduledTasks -ErrorAction Stop
+}
+catch {
+    Write-Warning "ScheduledTasks module could not be loaded. Scheduled task features will be disabled."
+    Write-Warning "This module is required for Windows Server 2012 R2 / Windows 8.1 and later."
+}
+
 # Script variables
-$script:ScriptVersion = '1.2.0'
+$script:ScriptVersion = '1.3.0'
 $script:ScriptPath = $PSScriptRoot
 $script:DefaultConfigPath = Join-Path $script:ScriptPath 'config.json'
 $script:Config = $null
@@ -320,6 +330,49 @@ function Test-AdministratorPrivilege {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Set-RestorePointFrequency {
+    <#
+    .SYNOPSIS
+        Sets the minimum time interval between restore point creation.
+    .DESCRIPTION
+        Configures the SystemRestorePointCreationFrequency registry value which controls
+        the minimum time interval (in minutes) between two restore point creations.
+        Default Windows value is 1440 minutes (24 hours).
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $false)]
+        [int]$FrequencyMinutes = 120  # Default: 2 hours
+    )
+
+    try {
+        $registryPath = "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore"
+        $registryName = "SystemRestorePointCreationFrequency"
+
+        Write-Log "Configuring restore point creation frequency to $FrequencyMinutes minutes ($([Math]::Round($FrequencyMinutes / 60, 2)) hours)" -Level INFO
+
+        # Ensure the registry path exists
+        if (-not (Test-Path $registryPath)) {
+            Write-Log "Registry path does not exist: $registryPath" -Level WARNING
+            return $false
+        }
+
+        # Set the registry value
+        if ($PSCmdlet.ShouldProcess($registryPath, "Set $registryName to $FrequencyMinutes")) {
+            Set-ItemProperty -Path $registryPath -Name $registryName -Value $FrequencyMinutes -Type DWord -ErrorAction Stop
+            Write-Log "Restore point creation frequency set to $FrequencyMinutes minutes" -Level SUCCESS
+            Write-Log "Windows will now allow restore points to be created every $([Math]::Round($FrequencyMinutes / 60, 2)) hours" -Level INFO
+            return $true
+        }
+
+        return $false
+    }
+    catch {
+        Write-Log "Failed to set restore point creation frequency: $_" -Level ERROR
+        return $false
+    }
+}
+
 function Enable-SystemRestore {
     <#
     .SYNOPSIS
@@ -328,32 +381,41 @@ function Enable-SystemRestore {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $false)]
-        [int]$DiskSpacePercent = 10
+        [int]$DiskSpacePercent = 10,
+
+        [Parameter(Mandatory = $false)]
+        [int]$FrequencyMinutes = 120
     )
-    
+
     try {
         $systemDrive = $env:SystemDrive
         Write-Log "Configuring System Restore for drive $systemDrive" -Level INFO
-        
+
         # Enable System Restore
         if ($PSCmdlet.ShouldProcess($systemDrive, "Enable System Restore")) {
             Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
             Write-Log "System Restore enabled on $systemDrive" -Level SUCCESS
         }
-        
+
+        # Configure restore point creation frequency
+        $frequencySet = Set-RestorePointFrequency -FrequencyMinutes $FrequencyMinutes
+        if (-not $frequencySet) {
+            Write-Log "Failed to set restore point creation frequency, but continuing" -Level WARNING
+        }
+
         # Configure disk space using VSSAdmin
         $diskSpacePercent = [Math]::Max(8, [Math]::Min(100, $DiskSpacePercent))
-        
+
         if ($PSCmdlet.ShouldProcess($systemDrive, "Set disk space to $diskSpacePercent%")) {
             $vssOutput = vssadmin Resize ShadowStorage /For=$systemDrive /On=$systemDrive /MaxSize="${diskSpacePercent}%" 2>&1
-            
+
             if ($LASTEXITCODE -eq 0) {
                 Write-Log "Disk space configured to $diskSpacePercent% for System Restore" -Level SUCCESS
             }
             else {
                 Write-Log "VSSAdmin output: $vssOutput" -Level WARNING
                 Write-Log "Attempting alternative configuration method" -Level INFO
-                
+
                 # Alternative: Use WMI
                 $wmi = Get-CimInstance -ClassName Win32_ShadowStorage -Filter "Volume='\\\\?\\$($systemDrive)\\'" -ErrorAction SilentlyContinue
                 if ($wmi) {
@@ -363,7 +425,7 @@ function Enable-SystemRestore {
                 }
             }
         }
-        
+
         return $true
     }
     catch {
@@ -388,6 +450,13 @@ function New-RestorePointScheduledTask {
     )
 
     try {
+        # Check if ScheduledTasks module is available
+        if (-not (Get-Module -Name ScheduledTasks -ListAvailable)) {
+            Write-Log "ScheduledTasks module is not available. Scheduled task creation skipped." -Level WARNING
+            Write-Log "This module is required for Windows Server 2012 R2 / Windows 8.1 and later." -Level INFO
+            return $false
+        }
+
         $taskName = $script:ScheduledTaskName
         $taskPath = $script:ScheduledTaskPath
 
@@ -552,7 +621,13 @@ function Invoke-ConfigureRestorePoint {
 
         # Step 1: Enable and configure System Restore
         $diskSpacePercent = $script:Config.RestorePoint.DiskSpacePercent
-        $result = Enable-SystemRestore -DiskSpacePercent $diskSpacePercent
+        $frequencyMinutes = if ($script:Config.RestorePoint.CreationFrequencyMinutes) {
+            $script:Config.RestorePoint.CreationFrequencyMinutes
+        } else {
+            120  # Default: 2 hours
+        }
+
+        $result = Enable-SystemRestore -DiskSpacePercent $diskSpacePercent -FrequencyMinutes $frequencyMinutes
 
         if (-not $result) {
             throw "System Restore configuration failed"
@@ -598,6 +673,7 @@ function Invoke-ConfigureRestorePoint {
 <p><strong>Computer:</strong> $env:COMPUTERNAME</p>
 <p><strong>Date:</strong> $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</p>
 <p><strong>Disk Space Allocated:</strong> $diskSpacePercent%</p>
+<p><strong>Creation Frequency:</strong> $([Math]::Round($frequencyMinutes / 60, 2)) hours</p>
 <p><strong>Initial Restore Point:</strong> $(if ($rpCreated) { 'Created' } else { 'Failed' })</p>
 <p><strong>Scheduled Task:</strong> $(if ($taskCreated) { 'Created' } else { 'Disabled or Failed' })</p>
 <p><strong>Schedule Interval:</strong> $([Math]::Round($script:Config.RestorePoint.ScheduleIntervalMinutes / 60, 2)) hours</p>
@@ -610,6 +686,7 @@ function Invoke-ConfigureRestorePoint {
         Write-Log "=== Configuration Summary ===" -Level SUCCESS
         Write-Log "System Restore: Enabled" -Level INFO
         Write-Log "Disk Space: $diskSpacePercent%" -Level INFO
+        Write-Log "Creation Frequency: $([Math]::Round($frequencyMinutes / 60, 2)) hours" -Level INFO
         Write-Log "Initial Restore Point: $(if ($rpCreated) { 'Created' } else { 'Failed' })" -Level INFO
         Write-Log "Scheduled Task: $(if ($taskCreated) { 'Created' } else { 'Disabled or Failed' })" -Level INFO
         Write-Log "Configuration completed successfully!" -Level SUCCESS

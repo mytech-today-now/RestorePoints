@@ -5,12 +5,13 @@ Comprehensive Windows System Restore Point management script with automated crea
 ## Features
 
 - ✅ **Automated Configuration** - Enables and configures System Restore with customizable disk space allocation (8-10%)
+- ✅ **Configurable Creation Frequency** - Sets Windows registry to allow restore points every 2 hours (default) instead of 24 hours
 - ✅ **Automatic Scheduled Task Creation** - Creates Windows Scheduled Task automatically during configuration
 - ✅ **Initial Restore Point** - Creates an initial restore point immediately after configuration
 - ✅ **Scheduled Creation** - Creates restore points automatically on a configurable schedule (default: daily)
 - ✅ **Intelligent Maintenance** - Maintains a minimum number of restore points (default: 10)
 - ✅ **Email Notifications** - Sends notifications when restore points are created, deleted, or applied
-- ✅ **Comprehensive Logging** - Logs all activities to a configurable file location
+- ✅ **Comprehensive Logging** - Logs all activities to centralized markdown log files (`C:\mytech.today\logs\`)
 - ✅ **Error Handling** - Robust error handling with fallback mechanisms
 - ✅ **Task Status Monitoring** - View scheduled task status with `-Action List`
 - ✅ **Scriptable** - Can be triggered by other scripts for automated workflows
@@ -86,6 +87,7 @@ The script uses a JSON configuration file (`config.json`) with the following str
 - **MaximumCount** (1-100): Maximum number of restore points before cleanup
 - **CreateOnSchedule** (true/false): Enable automatic restore point creation
 - **ScheduleIntervalMinutes** (1-43200): Interval between automatic restore points (in minutes)
+- **CreationFrequencyMinutes** (1-1440): Minimum time interval (in minutes) between restore point creation. Default Windows value is 1440 (24 hours). Recommended: 120 (2 hours) for more frequent protection
 
 #### Email Settings
 - **Enabled** (true/false): Enable email notifications

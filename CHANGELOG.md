@@ -7,24 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2025-10-31
+
+### Added - Restore Point Creation Frequency Control â±ï¸
+
+- **Registry Configuration** ðŸ"§
+  - Added `Set-RestorePointFrequency` function to configure Windows restore point creation frequency
+  - Sets `SystemRestorePointCreationFrequency` registry value in `HKLM:\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore`
+  - Default frequency changed from 1440 minutes (24 hours) to 120 minutes (2 hours)
+  - Allows more frequent restore point creation for better system protection
+
+- **Configuration Parameter** âš™ï¸
+  - Added `CreationFrequencyMinutes` parameter to `config.json`
+  - Default value: 120 minutes (2 hours)
+  - Configurable to any desired interval
+  - Applied automatically during `Configure` action
+
+### Changed
+
+- **Enable-SystemRestore Function** ðŸ"
+  - Added `FrequencyMinutes` parameter (default: 120)
+  - Now calls `Set-RestorePointFrequency` during configuration
+  - Improved error handling for frequency setting
+
+- **Configuration Summary** ðŸ"Š
+  - Added "Creation Frequency" to configuration summary output
+  - Shows frequency in hours for better readability
+  - Included in email notifications
+
+### Technical Details
+
+- Registry Path: `HKLM:\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore`
+- Registry Value: `SystemRestorePointCreationFrequency` (DWORD)
+- Default Windows Value: 1440 minutes (24 hours)
+- New Default Value: 120 minutes (2 hours)
+- Value Type: DWORD (32-bit integer)
+
+### Impact
+
+âœ… **More Frequent Protection** - Restore points can be created every 2 hours instead of 24 hours
+âœ… **Better Recovery Options** - More restore points available for system recovery
+âœ… **Configurable** - Frequency can be adjusted via config.json
+âœ… **Automatic Setup** - Applied during Configure action
+âœ… **Backward Compatible** - Defaults to 120 minutes if not specified in config
+
+### Configuration Example
+
+```json
+{
+  "RestorePoint": {
+    "DiskSpacePercent": 10,
+    "MinimumCount": 10,
+    "MaximumCount": 20,
+    "CreateOnSchedule": true,
+    "ScheduleIntervalMinutes": 1440,
+    "CreationFrequencyMinutes": 120
+  }
+}
+```
+
+### Usage
+
+The frequency is automatically configured when running:
+```powershell
+.\Manage-RestorePoints.ps1 -Action Configure
+```
+
+Output will include:
+```
+âœ… SUCCESS: Restore point creation frequency set to 120 minutes
+â„¹ï¸ INFO: Windows will now allow restore points to be created every 2 hours
+```
+
+## [1.2.1] - 2025-10-31
+
+### Fixed - ScheduledTasks Module Import ðŸ"§
+- **Module Import Error** âŒ â†' âœ…
+  - Added explicit import of ScheduledTasks module at script startup
+  - Fixed error: "The term 'New-ScheduledTaskSettings' is not recognized"
+  - Added graceful error handling if ScheduledTasks module is not available
+  - Added module availability check before creating scheduled tasks
+  - Script now works on systems where ScheduledTasks module may not be loaded by default
+
+### Changed
+- **Error Handling** ðŸ›¡ï¸
+  - Improved error messages for scheduled task creation failures
+  - Added informative warnings when ScheduledTasks module is unavailable
+  - Better user feedback about module requirements (Windows Server 2012 R2 / Windows 8.1+)
+
+### Technical Details
+- Added `Import-Module ScheduledTasks` with try-catch error handling
+- Added module availability check in `New-RestorePointScheduledTask` function
+- Updated script version to 1.2.1
+- Updated author to myTech.Today in script header
+
+### Impact
+- âœ… Scheduled task creation now works reliably on all supported Windows versions
+- âœ… Better error messages help users understand module requirements
+- âœ… Script continues to function even if scheduled tasks cannot be created
+- âœ… No breaking changes - all existing functionality preserved
+
 ## [1.2.0] - 2025-10-30
 
 ### Changed - myTech.Today Standardization
-- **Scheduled Task Location** 📁
+- **Scheduled Task Location** ðŸ"
   - Tasks now created in `\myTech.Today\` folder at root of Task Scheduler
   - Changed from `\Microsoft\Windows\SystemRestore\` to align with repository standards
   - Easier to find and manage all myTech.Today tasks in one location
-- **Centralized Logging** 📝
+- **Centralized Logging** ðŸ"
   - All logs now written to `C:\mytech.today\logs\` directory
   - Script-specific log files: `Manage-RestorePoints-yyyy-MM.md`
   - Monthly log rotation (one file per month)
   - Logs never overwritten - always appended
-- **Markdown Log Format** ✨
+- **Markdown Log Format** âœ¨
   - Logs now written in markdown table format with icons
   - Better readability and formatting
-  - Icons: ℹ️ INFO, ⚠️ WARNING, ❌ ERROR, ✅ SUCCESS
+  - Icons: â„¹ï¸ INFO, âš ï¸ WARNING, âŒ ERROR, âœ… SUCCESS
   - Log files include header with script version, computer name, user, etc.
-  - Example log entry: `| 2025-10-30 12:00:01 | ✅ **SUCCESS** | Operation completed |`
+  - Example log entry: `| 2025-10-30 12:00:01 | âœ… **SUCCESS** | Operation completed |`
 
 ### Added
 - `$script:CentralLogPath` variable for centralized log directory
@@ -43,25 +143,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Markdown log format specifications
 
 ### Impact
-- ✅ All myTech.Today tasks in one Task Scheduler folder
-- ✅ All myTech.Today logs in one central directory
-- ✅ Logs are human-readable markdown files
-- ✅ Easy to view logs in any markdown viewer
-- ✅ Monthly log rotation prevents files from growing too large
-- ✅ No breaking changes to functionality
-- ✅ Existing tasks will be recreated in new location on next configuration
+- âœ… All myTech.Today tasks in one Task Scheduler folder
+- âœ… All myTech.Today logs in one central directory
+- âœ… Logs are human-readable markdown files
+- âœ… Easy to view logs in any markdown viewer
+- âœ… Monthly log rotation prevents files from growing too large
+- âœ… No breaking changes to functionality
+- âœ… Existing tasks will be recreated in new location on next configuration
 
 ## [1.1.0] - 2025-10-29
 
 ### Added
-- **Automatic Scheduled Task Creation** 🎯
+- **Automatic Scheduled Task Creation** ðŸŽ¯
   - `Invoke-ConfigureRestorePoint` now automatically creates a Windows Scheduled Task
   - Task runs the script with `-Action Monitor` on a configurable schedule
   - Default: Daily at midnight (configurable via `ScheduleIntervalMinutes` in config.json)
   - Task runs as SYSTEM with highest privileges
   - Task path: `\Microsoft\Windows\SystemRestore\System Restore Point - Daily Monitoring`
   - Automatically removes and recreates task if it already exists
-- **Initial Restore Point Creation** 📍
+- **Initial Restore Point Creation** ðŸ"
   - `Invoke-ConfigureRestorePoint` now creates an initial restore point immediately after configuration
   - Description: "Initial Restore Point - Configuration Complete"
   - Uses `-Force` flag to bypass 24-hour restriction

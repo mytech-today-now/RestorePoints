@@ -79,17 +79,17 @@ if ($result.CodeCoverage) {
         }
     }
     else {
-        Write-Host "`n✓ Code coverage meets 98% target!" -ForegroundColor Green
+        Write-Host "`nâœ" Code coverage meets 98% target!" -ForegroundColor Green
     }
 }
 
 # Exit with appropriate code
 if ($result.FailedCount -gt 0) {
-    Write-Host "`n✗ Tests failed" -ForegroundColor Red
+    Write-Host "`nâœ— Tests failed" -ForegroundColor Red
     exit 1
 }
 else {
-    Write-Host "`n✓ All tests passed" -ForegroundColor Green
+    Write-Host "`nâœ" All tests passed" -ForegroundColor Green
     exit 0
 }
 

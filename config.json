@@ -4,7 +4,8 @@
     "MinimumCount": 10,
     "MaximumCount": 20,
     "CreateOnSchedule": true,
-    "ScheduleIntervalMinutes": 1440
+    "ScheduleIntervalMinutes": 1440,
+    "CreationFrequencyMinutes": 120
   },
   "Email": {
     "Enabled": false,
