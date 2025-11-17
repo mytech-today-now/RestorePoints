@@ -146,17 +146,32 @@ catch {
     Write-Warning "This module is required for Windows Server 2012 R2 / Windows 8.1 and later."
 }
 
+# Import generic logging module from GitHub for centralized logging
+$loggingUrl = 'https://raw.githubusercontent.com/mytech-today-now/scripts/refs/heads/main/logging.ps1'
+$script:LoggingModuleLoaded = $false
+
+try {
+    Write-Host "Loading generic logging module for Manage-RestorePoints..." -ForegroundColor Cyan
+    Invoke-Expression (Invoke-WebRequest -Uri $loggingUrl -UseBasicParsing).Content
+    $script:LoggingModuleLoaded = $true
+    Write-Host "[OK] Generic logging module loaded successfully" -ForegroundColor Green
+}
+catch {
+    Write-Host "[WARN] Could not load generic logging module from GitHub: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "[WARN] Script will continue using built-in logging implementation." -ForegroundColor Yellow
+}
+
 # Script variables
 $script:ScriptVersion = '1.5.0'
 $script:OriginalScriptPath = $PSScriptRoot
-$script:SystemInstallPath = "$env:windir\mytech.today\RestorePoints"
+$script:SystemInstallPath = "$env:USERPROFILE\myTech.Today\RestorePoints"
 $script:ScriptPath = $script:SystemInstallPath  # Will be updated after copy
-$script:DefaultConfigPath = "$env:windir\mytech.today\RestorePoints\config.json"
+$script:DefaultConfigPath = "$env:USERPROFILE\myTech.Today\RestorePoints\config.json"
 $script:Config = $null
 $script:LogPath = $null
 $script:ScheduledTaskName = "System Restore Point - Daily Monitoring"
 $script:ScheduledTaskPath = "\myTech.Today\"
-$script:CentralLogPath = "$env:windir\mytech.today\logs\"
+$script:CentralLogPath = "$env:USERPROFILE\myTech.Today\"
 $script:SkipEmailForThisRun = $false
 
 #region Self-Installation to System Location
@@ -530,7 +545,7 @@ function Get-Configuration {
         [Parameter(Mandatory = $false)]
         [string]$Path
     )
-    
+
     try {
         if (-not $Path) {
             $Path = $script:DefaultConfigPath
@@ -606,7 +621,7 @@ function New-DefaultConfiguration {
             PasswordEncrypted = ''
         }
         Logging = [PSCustomObject]@{
-            LogPath = "$env:windir\mytech.today\logs\Manage-RestorePoints-$(Get-Date -Format 'yyyy-MM').md"
+            LogPath = "$env:USERPROFILE\myTech.Today\Manage-RestorePoints-$(Get-Date -Format 'yyyy-MM').md"
             MaxLogSizeMB = 10
             RetentionDays = 30
         }
@@ -1200,7 +1215,7 @@ function Test-AdministratorPrivilege {
     #>
     [CmdletBinding()]
     param()
-    
+
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -2100,27 +2115,39 @@ try {
         $script:Config = Get-Configuration
     }
 
-    # Set up logging - Use config log path or default
-    if ($script:Config.Logging.LogPath) {
-        $script:LogPath = $script:Config.Logging.LogPath
-    } else {
-        # Fallback to central log path if config doesn't specify
-        $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-        $logFileName = "$scriptName-$(Get-Date -Format 'yyyy-MM').md"
-        $script:LogPath = Join-Path $script:CentralLogPath $logFileName
+    # Set up logging
+    if ($script:LoggingModuleLoaded -and (Get-Command Initialize-Log -ErrorAction SilentlyContinue)) {
+        # Use centralized logging module
+        if ($script:Config.Logging.LogPath) {
+            $script:LogPath = Initialize-Log -ScriptName "Manage-RestorePoints" -ScriptVersion $script:ScriptVersion -LogPath $script:Config.Logging.LogPath
+        }
+        else {
+            $script:LogPath = Initialize-Log -ScriptName "Manage-RestorePoints" -ScriptVersion $script:ScriptVersion
+        }
     }
+    else {
+        # Set up logging - Use config log path or default
+        if ($script:Config.Logging.LogPath) {
+            $script:LogPath = $script:Config.Logging.LogPath
+        }
+        else {
+            # Fallback to central log path if config doesn't specify
+            $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+            $logFileName = "$scriptName-$(Get-Date -Format 'yyyy-MM').md"
+            $script:LogPath = Join-Path $script:CentralLogPath $logFileName
+        }
 
-    # Create log directory if it doesn't exist
-    $logDir = Split-Path $script:LogPath -Parent
-    if (-not (Test-Path $logDir)) {
-        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-        Write-Verbose "Created log directory: $logDir"
-    }
+        # Create log directory if it doesn't exist
+        $logDir = Split-Path $script:LogPath -Parent
+        if (-not (Test-Path $logDir)) {
+            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+            Write-Verbose "Created log directory: $logDir"
+        }
 
-    # Initialize markdown log file if it doesn't exist
-    if (-not (Test-Path $script:LogPath)) {
-        $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-        $logHeader = @"
+        # Initialize markdown log file if it doesn't exist
+        if (-not (Test-Path $script:LogPath)) {
+            $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+            $logHeader = @"
 # $scriptName Log
 
 **Script Version:** $script:ScriptVersion
@@ -2136,7 +2163,8 @@ try {
 |-----------|-------|---------|
 
 "@
-        Set-Content -Path $script:LogPath -Value $logHeader -Force
+            Set-Content -Path $script:LogPath -Value $logHeader -Force
+        }
     }
 
     # Start transcript logging to capture all console output and errors
