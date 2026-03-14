@@ -48,7 +48,12 @@
     Author         : myTech.Today
     Prerequisite   : PowerShell 5.1 or later, Administrator privileges
     Copyright      : (c) 2025 myTech.Today. All rights reserved.
-    Version        : 1.6.0
+    Version        : 1.7.0
+
+    Changelog v1.7.0:
+    - Fixed crash when srservice (System Restore) is not installed (e.g. Windows Server)
+    - Ensure-RestorePointServices now checks service existence before configuration
+    - Gracefully degrades with a warning instead of a terminating error
 
     Changelog v1.6.0:
     - Added Ensure-RestorePointServices function to auto-enable srservice and VSS
@@ -1286,8 +1291,15 @@ function Ensure-RestorePointServices {
     $allGood = $true
 
     foreach ($svcName in @('srservice', 'VSS')) {
+        # Check if the service exists before trying to configure it
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if (-not $svc) {
+            Write-Log "Service '$svcName' is not installed on this system. System Restore may not be available." -Level WARNING
+            $allGood = $false
+            continue
+        }
+
         try {
-            $svc = Get-Service -Name $svcName -ErrorAction Stop
             Write-Log "Service '$svcName' status: $($svc.Status), StartType: $($svc.StartType)" -Level INFO
 
             if ($svc.StartType -eq 'Disabled') {
