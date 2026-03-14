@@ -48,7 +48,13 @@
     Author         : myTech.Today
     Prerequisite   : PowerShell 5.1 or later, Administrator privileges
     Copyright      : (c) 2025 myTech.Today. All rights reserved.
-    Version        : 1.5.0
+    Version        : 1.6.0
+
+    Changelog v1.6.0:
+    - Added Ensure-RestorePointServices function to auto-enable srservice and VSS
+    - Script now checks and starts required services before creating restore points
+    - Enables System Protection on C: drive via Enable-ComputerRestore if not already enabled
+    - Prevents "service cannot be started because it is disabled" errors on fresh VMs
 
     Changelog v1.5.0:
     - Fixed memory leaks by properly disposing of IDisposable objects
@@ -158,7 +164,7 @@ catch {
 }
 
 # Script variables
-$script:ScriptVersion = '1.5.0'
+$script:ScriptVersion = '1.6.0'
 $script:OriginalScriptPath = $PSScriptRoot
 $script:SystemInstallPath = "$env:USERPROFILE\myTech.Today\RestorePoints"
 $script:ScriptPath = $script:SystemInstallPath  # Will be updated after copy
@@ -1260,6 +1266,89 @@ function Set-RestorePointFrequency {
     }
 }
 
+function Ensure-RestorePointServices {
+    <#
+    .SYNOPSIS
+        Ensures that the services required for System Restore are enabled and running.
+
+    .DESCRIPTION
+        Checks the System Restore Service (srservice) and Volume Shadow Copy (VSS) services.
+        If either service is disabled, it sets the start type to Manual and starts it.
+        Also enables System Protection on the system drive via Enable-ComputerRestore
+        if it is not already enabled.
+
+    .OUTPUTS
+        [bool] $true if all prerequisites are satisfied, $false otherwise.
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param()
+
+    $allGood = $true
+
+    foreach ($svcName in @('srservice', 'VSS')) {
+        try {
+            $svc = Get-Service -Name $svcName -ErrorAction Stop
+            Write-Log "Service '$svcName' status: $($svc.Status), StartType: $($svc.StartType)" -Level INFO
+
+            if ($svc.StartType -eq 'Disabled') {
+                if ($PSCmdlet.ShouldProcess($svcName, "Set start type to Manual")) {
+                    Set-Service -Name $svcName -StartupType Manual -ErrorAction Stop
+                    Write-Log "Service '$svcName' start type changed from Disabled to Manual" -Level SUCCESS
+                }
+            }
+
+            if ($svc.Status -ne 'Running') {
+                if ($PSCmdlet.ShouldProcess($svcName, "Start service")) {
+                    Start-Service -Name $svcName -ErrorAction Stop
+                    Write-Log "Service '$svcName' started successfully" -Level SUCCESS
+                }
+            }
+        }
+        catch {
+            Write-Log "Failed to configure service '$svcName': $_" -Level ERROR -ErrorRecord $_
+            Write-DetailedError -Operation "Ensure service '$svcName' is enabled and running" -ErrorRecord $_ -AdditionalContext @{
+                ServiceName = $svcName
+            }
+            $allGood = $false
+        }
+    }
+
+    # Enable System Protection on the system drive if not already enabled
+    try {
+        $systemDrive = $env:SystemDrive
+        $spStatus = Get-CimInstance -ClassName SystemRestoreConfig -Namespace 'root\default' -ErrorAction Stop
+        if (-not $spStatus -or $spStatus.RPSessionInterval -eq 0) {
+            Write-Log "System Protection is not enabled on $systemDrive. Enabling..." -Level WARNING
+            if ($PSCmdlet.ShouldProcess($systemDrive, "Enable System Protection via Enable-ComputerRestore")) {
+                Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
+                Write-Log "System Protection enabled on $systemDrive" -Level SUCCESS
+            }
+        }
+        else {
+            Write-Log "System Protection is already enabled on $systemDrive" -Level INFO
+        }
+    }
+    catch {
+        # Enable-ComputerRestore may fail if srservice just started; try it anyway
+        try {
+            Write-Log "Could not query System Protection status; attempting to enable it directly" -Level WARNING
+            if ($PSCmdlet.ShouldProcess($env:SystemDrive, "Enable System Protection (fallback)")) {
+                Enable-ComputerRestore -Drive $env:SystemDrive -ErrorAction Stop
+                Write-Log "System Protection enabled on $env:SystemDrive (fallback)" -Level SUCCESS
+            }
+        }
+        catch {
+            Write-Log "Failed to enable System Protection: $_" -Level ERROR -ErrorRecord $_
+            Write-DetailedError -Operation "Enable System Protection on $env:SystemDrive" -ErrorRecord $_ -AdditionalContext @{
+                Drive = $env:SystemDrive
+            }
+            $allGood = $false
+        }
+    }
+
+    return $allGood
+}
+
 function Enable-SystemRestore {
     <#
     .SYNOPSIS
@@ -1277,6 +1366,12 @@ function Enable-SystemRestore {
     try {
         $systemDrive = $env:SystemDrive
         Write-Log "Configuring System Restore for drive $systemDrive" -Level INFO
+
+        # Ensure required services are enabled and running before proceeding
+        $servicesReady = Ensure-RestorePointServices
+        if (-not $servicesReady) {
+            Write-Log "Some required services could not be configured, but will attempt to continue" -Level WARNING
+        }
 
         # Enable System Restore
         if ($PSCmdlet.ShouldProcess($systemDrive, "Enable System Restore")) {
@@ -1801,6 +1896,12 @@ function Invoke-CreateRestorePoint {
                 # Continue with creation even if check fails
                 Write-Log "Could not check recent restore points, proceeding with creation" -Level WARNING
             }
+        }
+
+        # Ensure required services are running before attempting creation
+        $servicesReady = Ensure-RestorePointServices
+        if (-not $servicesReady) {
+            Write-Log "Some required services could not be configured, but will attempt restore point creation" -Level WARNING
         }
 
         # Create the restore point
